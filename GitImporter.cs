@@ -27,6 +27,7 @@ namespace GitItemRepositoryProofOfConcept
         string m_workingFolder;
         GitLabSession m_session;
         TextWriter m_Log;
+        int m_currentItemIndex = 0;
 
         public GitImporter(string gitLabUrl, string userId, string password)
         {
@@ -101,7 +102,11 @@ namespace GitItemRepositoryProofOfConcept
             using (m_Log = new StreamWriter(logFileName, true))
             {
                 // Write the log header (if it doesn't already exist)
-                if (!logExists) m_Log.WriteLine("Item,Exists,Create,Push,Total");
+                if (!logExists)
+                {
+                    m_Log.WriteLine("Item,Exists,Create,Push,Total");
+                    m_Log.Flush();
+                }
 
                 using (ZipArchive zip = ZipFile.Open(filename, ZipArchiveMode.Read))
                 {
@@ -164,7 +169,8 @@ namespace GitItemRepositoryProofOfConcept
         private void ImportItemToGit(string folderPath, string groupName, string itemName)
         {
             Console.WriteLine("----------------");
-            Console.WriteLine(itemName);
+            Console.WriteLine("{0}: {1}", m_currentItemIndex, itemName);
+            ++m_currentItemIndex;
             Console.WriteLine();
 
             Stopwatch stopwatch = new Stopwatch();
@@ -217,6 +223,7 @@ namespace GitItemRepositoryProofOfConcept
             Console.Write("Log: ");
             Console.WriteLine(logLine);
             m_Log.WriteLine(logLine);
+            m_Log.Flush();
 
             // Log: itemName, exists, project create time, project push time, total time
             // Flush log
