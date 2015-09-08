@@ -157,7 +157,8 @@ namespace GitItemRepositoryProofOfConcept
                 string ext = Path.GetExtension(parts[2]);
                 if (string.Equals(ext, ".mp4", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(ext, ".m4a", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(ext, ".ogg", StringComparison.OrdinalIgnoreCase)) continue;
+                    || string.Equals(ext, ".ogg", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(ext, ".png", StringComparison.OrdinalIgnoreCase)) continue;
 
                 itemFiles.Add(entry.FullName);
             }
@@ -178,7 +179,9 @@ namespace GitItemRepositoryProofOfConcept
 
             long startExists = stopwatch.ElapsedTicks; // Will be near zero but doing this for consistency
 
-            if (m_session.ProjectExists(itemName, groupName))
+            GitLabSession.ProjectStatus projectStatus = m_session.GetProjectStatus(itemName, groupName);
+            //Console.WriteLine("ProjectStatus = {0}", projectStatus);
+            if (projectStatus == GitLabSession.ProjectStatus.HasContents)
             {
                 stopwatch.Stop();
                 Console.WriteLine("Item already exists on GitLab. ({0:N3}ms)",
@@ -196,8 +199,15 @@ namespace GitItemRepositoryProofOfConcept
             long startCreateProject = stopwatch.ElapsedTicks;
 
             // Create the corresponding project on GitLab
-            m_session.CreateProject(itemName, groupName);
-            Console.WriteLine("Project '{0}/{1}' created on GitLab.", groupName, itemName);
+            if (projectStatus == GitLabSession.ProjectStatus.NonExistent)
+            {
+                m_session.CreateProject(itemName, groupName);
+                Console.WriteLine("Project '{0}/{1}' created on GitLab.", groupName, itemName);
+            }
+            else
+            {
+                Console.WriteLine("Empty project '{0}/{1}' already exists on GitLab.", groupName, itemName);
+            }
 
             long endCreateProject = stopwatch.ElapsedTicks;
 
@@ -219,34 +229,53 @@ namespace GitItemRepositoryProofOfConcept
                 ((double)(endCreateProject-startCreateProject)) / (((double)Stopwatch.Frequency) / 1000.0),
                 ((double)(endPush-startPush)) / (((double)Stopwatch.Frequency) / 1000.0),
                 ((double)stopwatch.ElapsedTicks) / (((double)Stopwatch.Frequency) / 1000.0));
-            Console.Write("Log: ");
-            Console.WriteLine(logLine);
             m_Log.WriteLine(logLine);
             m_Log.Flush();
 
-            // Log: itemName, exists, project create time, project push time, total time
-            // Flush log
+            Console.Write("Log: ");
+            Console.WriteLine(logLine);
+            Console.WriteLine("Items = {0}, CallsRequiringRetries = {1}, AverageRetries = {2:N1}", m_currentItemIndex, m_gitRetryCalls, ((double)m_gitRetries) / ((double)m_gitRetryCalls));
+            Console.WriteLine();
         }
+
+        const int c_gitMaxAttempts = 5;
+        int m_gitRetries = 0;
+        int m_gitRetryCalls = 0;
 
         private void ExecGit(string folderPath, string args)
         {
-            Console.WriteLine("git " + args);
-            using (Process p = new Process())
+            int exitCode = 0;
+            for (int attempt = 0; attempt < c_gitMaxAttempts; ++attempt)
             {
-                p.StartInfo.EnvironmentVariables["PATH"] = string.Concat(c_gitPathAdditions, ";", p.StartInfo.EnvironmentVariables["PATH"]);
-                p.StartInfo.EnvironmentVariables["EDITOR"] = "GitPad";
-                p.StartInfo.EnvironmentVariables["github_git"] = @"C:\Users\Brandt\AppData\Local\GitHub\PortableGit_c2ba306e536fdf878271f7fe636a147ff37326ad";
-                p.StartInfo.EnvironmentVariables["github_shell"] = @"true";
-                p.StartInfo.EnvironmentVariables["git_install_root"] = @"C:\Users\Brandt\AppData\Local\GitHub\PortableGit_c2ba306e536fdf878271f7fe636a147ff37326ad";
-                p.StartInfo.EnvironmentVariables["HOME"] = p.StartInfo.EnvironmentVariables["HOMEDRIVE"] + p.StartInfo.EnvironmentVariables["HOMEPATH"];
-                p.StartInfo.UseShellExecute = false;
-                p.StartInfo.FileName = @"C:\Users\Brandt\AppData\Local\GitHub\PortableGit_c2ba306e536fdf878271f7fe636a147ff37326ad\bin\git.exe";
-                p.StartInfo.Arguments = args;
-                p.StartInfo.WorkingDirectory = folderPath;
-                p.Start();
-                p.WaitForExit();
+                Console.WriteLine("git " + args);
+                using (Process p = new Process())
+                {
+                    p.StartInfo.EnvironmentVariables["PATH"] = string.Concat(c_gitPathAdditions, ";", p.StartInfo.EnvironmentVariables["PATH"]);
+                    p.StartInfo.EnvironmentVariables["EDITOR"] = "GitPad";
+                    p.StartInfo.EnvironmentVariables["github_git"] = @"C:\Users\Brandt\AppData\Local\GitHub\PortableGit_c2ba306e536fdf878271f7fe636a147ff37326ad";
+                    p.StartInfo.EnvironmentVariables["github_shell"] = @"true";
+                    p.StartInfo.EnvironmentVariables["git_install_root"] = @"C:\Users\Brandt\AppData\Local\GitHub\PortableGit_c2ba306e536fdf878271f7fe636a147ff37326ad";
+                    p.StartInfo.EnvironmentVariables["HOME"] = p.StartInfo.EnvironmentVariables["HOMEDRIVE"] + p.StartInfo.EnvironmentVariables["HOMEPATH"];
+                    p.StartInfo.UseShellExecute = false;
+                    p.StartInfo.FileName = @"C:\Users\Brandt\AppData\Local\GitHub\PortableGit_c2ba306e536fdf878271f7fe636a147ff37326ad\bin\git.exe";
+                    p.StartInfo.Arguments = args;
+                    p.StartInfo.WorkingDirectory = folderPath;
+                    p.Start();
+                    p.WaitForExit();
+                    Console.WriteLine();
+
+                    if (p.ExitCode == 0) return;
+                    exitCode = p.ExitCode;
+                }
+
+                ++m_gitRetries;
+                if (attempt == 0) ++m_gitRetryCalls;
+
+                System.Threading.Thread.Sleep(1000);
             }
             Console.WriteLine();
+
+            throw new ApplicationException(string.Format("Exit code {0} returned from: git {1} after {2} retries", exitCode, args, c_gitMaxAttempts));
         }
 
         private static void DeleteFolder(DirectoryInfo di)

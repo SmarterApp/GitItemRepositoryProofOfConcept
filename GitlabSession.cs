@@ -40,7 +40,14 @@ namespace GitItemRepositoryProofOfConcept
             XPathDocument doc = CallHttp("/api/v3/projects", Method.POST, "name", projectName, "namespace_id", groupId);
         }
 
-        public bool ProjectExists(string projectName, string groupName)
+        public enum ProjectStatus
+        {
+            NonExistent = 0,
+            Empty = 1,
+            HasContents = 2
+        }
+
+        public ProjectStatus GetProjectStatus(string projectName, string groupName)
         {
             string url = string.Format("{0}/api/v3/projects/{1}%2F{2}", _hostUrl, groupName, projectName);
             //Console.WriteLine("GET {0}", url);
@@ -49,45 +56,39 @@ namespace GitItemRepositoryProofOfConcept
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
             request.Headers.Add("PRIVATE-TOKEN", _privateToken);
 
-
-            int statusCode = 0;
-            string responseText = null;
-
-            HttpWebResponse response = null;
             try
             {
-                try
+                XPathDocument xml;
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
                 {
-                    response = (HttpWebResponse)request.GetResponse();
-                }
-                catch (WebException err)
-                {
-                    response = (HttpWebResponse)err.Response;
-                }
-
-                statusCode = (int)response.StatusCode;
-                using (StreamReader reader = new StreamReader(response.GetResponseStream()))
-                {
-                    responseText = reader.ReadToEnd();
+                    using (XmlReader reader = JsonReaderWriterFactory.CreateJsonReader(response.GetResponseStream(), new XmlDictionaryReaderQuotas()))
+                    {
+                        xml = new XPathDocument(reader);
+                    }
                 }
 
-                if (statusCode != (int)HttpStatusCode.OK && statusCode != (int)HttpStatusCode.NotFound)
-                {
-                    throw new ApplicationException(string.Format("HTTP Error {0} {1}\r\n{2}", statusCode, ((HttpStatusCode)statusCode).ToString(), responseText));
-                }
+                //DumpDoc(xml);
+                string defaultBranch = Eval(xml.CreateNavigator(), "root/default_branch");
+                return string.IsNullOrEmpty(defaultBranch) ? ProjectStatus.Empty : ProjectStatus.HasContents;
             }
-            finally
+            catch (WebException err)
             {
-                if (response != null)
+                using (HttpWebResponse response = (HttpWebResponse)err.Response)
                 {
-                    response.Dispose();
-                    response = null;
+                    if (response.StatusCode == HttpStatusCode.NotFound)
+                    {
+                        return ProjectStatus.NonExistent;
+                    }
+                    else
+                    {
+                        using (StreamReader reader = new StreamReader(response.GetResponseStream()))
+                        {
+                            string responseText = reader.ReadToEnd();
+                            throw new ApplicationException(string.Format("HTTP Error {0} {1}\r\n{2}", (int)response.StatusCode, response.StatusCode, responseText));
+                        }
+                    }
                 }
             }
-
-            //Console.WriteLine("{0} {1}", statusCode, ((HttpStatusCode)statusCode).ToString());
-            //Console.WriteLine(responseText);
-            return (statusCode == 200);
         }
 
         public int GetGroupId(string groupName)
