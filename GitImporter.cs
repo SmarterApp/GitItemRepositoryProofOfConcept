@@ -49,27 +49,12 @@ namespace GitItemRepositoryProofOfConcept
 
             using (ZipArchive zip = ZipFile.Open(filename, ZipArchiveMode.Read))
             {
+                List<string> itemFiles = GetSortedItemFileList(zip);
+
                 string currentItemId = null;
-                foreach (var entry in zip.Entries)
+                foreach (string fullName in itemFiles)
                 {
-                    // Ignore folder names
-                    if (string.IsNullOrEmpty(entry.Name)) continue;
-
-                    string fullname = entry.FullName.Replace('\\', '/');
-
-                    // Supported format is <type>/<id>/<filename>
-                    // type = Items or Stimuli
-                    // ID is item-12345 or stim-12345
-                    string[] parts = fullname.Split('/');
-                    if (parts.Length != 3) continue;    // Skip unsupported files (e.g. imsmanifest.xml)
-                    if (!string.Equals(parts[0], "Items", StringComparison.OrdinalIgnoreCase)
-                        && !string.Equals(parts[0], "Stimuli", StringComparison.OrdinalIgnoreCase)) continue;
-
-                    // Suppress media files (to save space on the test server)
-                    string ext = Path.GetExtension(parts[2]);
-                    if (string.Equals(ext, ".mp4", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(ext, ".m4a", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(ext, ".ogg", StringComparison.OrdinalIgnoreCase)) continue;
+                    string[] parts = fullName.Split('/', '\\');
 
                     if (!string.Equals(currentItemId, parts[1], StringComparison.OrdinalIgnoreCase))
                     {
@@ -77,6 +62,7 @@ namespace GitItemRepositoryProofOfConcept
                         currentItemId = parts[1];
                     }
 
+                    ZipArchiveEntry entry = zip.GetEntry(fullName);
 
                     ++totalFiles;
                     totalSize += entry.Length;
@@ -110,28 +96,13 @@ namespace GitItemRepositoryProofOfConcept
 
                 using (ZipArchive zip = ZipFile.Open(filename, ZipArchiveMode.Read))
                 {
+                    List<string> itemFiles = GetSortedItemFileList(zip);
+
                     string currentItemId = null;
                     string currentFolderName = null;
-                    foreach (var entry in zip.Entries)
+                    foreach (string fullName in itemFiles)
                     {
-                        // Ignore folder names
-                        if (string.IsNullOrEmpty(entry.Name)) continue;
-
-                        string fullname = entry.FullName.Replace('\\', '/');
-
-                        // Supported format is <type>/<id>/<filename>
-                        // type = Items or Stimuli
-                        // ID is item-12345 or stim-12345
-                        string[] parts = fullname.Split('/');
-                        if (parts.Length != 3) continue;    // Skip unsupported files (e.g. imsmanifest.xml)
-                        if (!string.Equals(parts[0], "Items", StringComparison.OrdinalIgnoreCase)
-                            && !string.Equals(parts[0], "Stimuli", StringComparison.OrdinalIgnoreCase)) continue;
-
-                        // Suppress media files (to save space on the test server)
-                        string ext = Path.GetExtension(parts[2]);
-                        if (string.Equals(ext, ".mp4", StringComparison.OrdinalIgnoreCase)
-                            || string.Equals(ext, ".m4a", StringComparison.OrdinalIgnoreCase)
-                            || string.Equals(ext, ".ogg", StringComparison.OrdinalIgnoreCase)) continue;
+                        string[] parts = fullName.Split('/', '\\');
 
                         // If this file has a new item ID, save the current one and prep to process the new.
                         if (!string.Equals(currentItemId, parts[1], StringComparison.OrdinalIgnoreCase))
@@ -151,7 +122,7 @@ namespace GitItemRepositoryProofOfConcept
                         }
 
                         // Extract the file
-                        entry.ExtractToFile(Path.Combine(currentFolderName, entry.Name), true);
+                        zip.GetEntry(fullName).ExtractToFile(Path.Combine(currentFolderName, parts[2]), true);
                     }
 
                     // Finalize last entry
@@ -164,6 +135,35 @@ namespace GitItemRepositoryProofOfConcept
                 }
             }
             m_Log = null;
+        }
+
+        private List<string> GetSortedItemFileList(ZipArchive zip)
+        {
+            List<string> itemFiles = new List<string>();
+            foreach (var entry in zip.Entries)
+            {
+                // Ignore folder names
+                if (string.IsNullOrEmpty(entry.Name)) continue;
+
+                // Supported format is <type>/<id>/<filename>
+                // type = Items or Stimuli
+                // ID is item-12345 or stim-12345
+                string[] parts = entry.FullName.Split('/', '\\');
+                if (parts.Length != 3) continue;    // Skip unsupported files (e.g. imsmanifest.xml)
+                if (!string.Equals(parts[0], "Items", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(parts[0], "Stimuli", StringComparison.OrdinalIgnoreCase)) continue;
+
+                // Suppress media files (to save space on the test server)
+                string ext = Path.GetExtension(parts[2]);
+                if (string.Equals(ext, ".mp4", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(ext, ".m4a", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(ext, ".ogg", StringComparison.OrdinalIgnoreCase)) continue;
+
+                itemFiles.Add(entry.FullName);
+            }
+            itemFiles.Sort();
+
+            return itemFiles;
         }
 
         private void ImportItemToGit(string folderPath, string groupName, string itemName)
@@ -202,7 +202,6 @@ namespace GitItemRepositoryProofOfConcept
             long endCreateProject = stopwatch.ElapsedTicks;
 
             // Add the origin project to local git
-            ExecGit(folderPath, string.Concat("config user.name \"", m_userId, "\""));
             ExecGit(folderPath, string.Concat("remote add origin ", m_gitLabUrl, "/", groupName.ToLowerInvariant(), "/", itemName.ToLowerInvariant(), ".git"));
 
             long startPush = stopwatch.ElapsedTicks;
