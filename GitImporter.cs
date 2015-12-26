@@ -191,6 +191,13 @@ namespace GitItemRepositoryProofOfConcept
 
             long endExists = stopwatch.ElapsedTicks;
 
+            // Clear out any existing local repository
+            if (Directory.Exists(Path.Combine(folderPath, ".git")))
+            {
+                DeleteItemFolder(Path.Combine(folderPath, ".git"));
+                Console.WriteLine("Removed existing repository.");
+            }
+
             // Create a Git repository for the item and add everything to it
             ExecGit(folderPath, "init");
             ExecGit(folderPath, "add -A");
@@ -210,6 +217,9 @@ namespace GitItemRepositoryProofOfConcept
             }
 
             long endCreateProject = stopwatch.ElapsedTicks;
+
+            // Give it 30 seconds to finish provisioning the project
+            if (projectStatus == GitLabSession.ProjectStatus.NonExistent) System.Threading.Thread.Sleep(15000);
 
             // Add the origin project to local git
             ExecGit(folderPath, string.Concat("remote add origin ", m_gitLabUrl, "/", groupName.ToLowerInvariant(), "/", itemName.ToLowerInvariant(), ".git"));
